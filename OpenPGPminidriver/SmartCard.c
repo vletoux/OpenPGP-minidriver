@@ -229,37 +229,41 @@ DWORD OCardGetData(__in PCARD_DATA  pCardData,
 				SW1 = recvbuf[recvlen-2];
 				SW2 = recvbuf[recvlen-1];
 			}
-			if ( ( SW1 == 0x90 ) && ( SW2 == 0x00 ) )
+			if ( (( SW1 == 0x90 ) && ( SW2 == 0x00 )) || (SW1 == 0x61) )
 			{
-				dwDataSize = recvlen-2;
-				*pbResponse = pCardData->pfnCspAlloc(dwDataSize);
-				if (! *pbResponse)
+				// append the data of this response: with 61xx the answer comes in several parts
+				DWORD dwChunkSize = recvlen-2;
+				PBYTE pbNewResponse;
+				if (*pbResponse)
+				{
+					pbNewResponse = pCardData->pfnCspReAlloc(*pbResponse, dwDataSize + dwChunkSize + 1);
+				}
+				else
+				{
+					pbNewResponse = pCardData->pfnCspAlloc(dwDataSize + dwChunkSize + 1);
+				}
+				if (! pbNewResponse)
 				{
 					Trace(WINEVENT_LEVEL_ERROR, L"SCARD_E_NO_MEMORY");
 					dwReturn = SCARD_E_NO_MEMORY;
 					__leave;
 				}
-				memcpy(*pbResponse, recvbuf, dwDataSize);
-			}
-			else if (SW1 == 0x61)
-			{
-				dwDataSize += SW2;
-				if (*pbResponse)
+				*pbResponse = pbNewResponse;
+				memcpy(*pbResponse + dwDataSize, recvbuf, dwChunkSize);
+				dwDataSize += dwChunkSize;
+				if (SW1 == 0x61)
 				{
-					*pbResponse = pCardData->pfnCspReAlloc(*pbResponse, dwDataSize);
-				}
-				else
-				{
-					*pbResponse = pCardData->pfnCspAlloc(dwDataSize);
-				}
-				dwGetResponseSize = ARRAYSIZE(pbGetResponse);
-				dwReturn = SCardTransmit(pCardData->hScard, 
+					pbGetResponse[4] = SW2;
+					dwGetResponseSize = ARRAYSIZE(pbGetResponse);
+					recvlen = sizeof(recvbuf);
+					dwReturn = SCardTransmit(pCardData->hScard, 
 									SCARD_PCI_T1, 
 									pbGetResponse, 
 									dwGetResponseSize, 
 									NULL, 
 									recvbuf, 
 									&recvlen);
+				}
 			}
 			else if ( (SW1 == 0x69) && (SW2 == 0x82) )
 			{

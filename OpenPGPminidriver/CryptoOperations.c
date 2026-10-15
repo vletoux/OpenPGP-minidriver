@@ -54,7 +54,7 @@ BYTE dwSHA256EncodedOid[] = {0x30, 0x31, 0x30, 0x0D,0x06, 0x09, 0x60, 0x86, 0x48
 			0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0x04, 0x20};
 BYTE dwSHA384EncodedOid[] = {0x30, 0x41, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01,
 			0x65, 0x03, 0x04, 0x02, 0x02, 0x05, 0x00, 0x04, 0x30};
-BYTE dwSHA512EncodedOid[] = {0x30, 0x41, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01,
+BYTE dwSHA512EncodedOid[] = {0x30, 0x51, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01,
 			0x65, 0x03, 0x04, 0x02, 0x03, 0x05, 0x00, 0x04, 0x40};
 
 #define OPENPGP_NO_OID 0xFFFFFFFF
@@ -63,13 +63,13 @@ OPENPGP_SUPPORTED_SIGNATURE_ALGORITHM SignatureAlgorithm[] =
 	{CALG_SHA1,20, 
 			dwSHA1EncodedOid,
 			ARRAYSIZE(dwSHA1EncodedOid), BCRYPT_SHA1_ALGORITHM},
-	{CALG_SHA-256,32,
+	{CALG_SHA_256,32,
 			dwSHA256EncodedOid,
 			ARRAYSIZE(dwSHA256EncodedOid), BCRYPT_SHA256_ALGORITHM},
-	{CALG_SHA-384,48,
+	{CALG_SHA_384,48,
 			dwSHA384EncodedOid,
 			ARRAYSIZE(dwSHA384EncodedOid), BCRYPT_SHA384_ALGORITHM},
-	{CALG_SHA-512,64,
+	{CALG_SHA_512,64,
 			dwSHA512EncodedOid,
 			ARRAYSIZE(dwSHA512EncodedOid), BCRYPT_SHA512_ALGORITHM},
 };
@@ -566,6 +566,7 @@ DWORD OCardUpdateCachedPublicKey(__in PCARD_DATA pCardData, __in OPENPGP_KEY dwK
 	PBYTE pbModulus;
 	DWORD dwI;
 	PBYTE pbExponent;
+	DWORD dwExponentSize = 0;
 	POPENPGP_CONTEXT pContext = (POPENPGP_CONTEXT) pCardData->pvVendorSpecific;
 	__try
 	{
@@ -581,16 +582,21 @@ DWORD OCardUpdateCachedPublicKey(__in PCARD_DATA pCardData, __in OPENPGP_KEY dwK
 			pCardData->pfnCspFree(pContext->pbModulusInLittleEndian[dwKey]);
 			pContext->pbModulusInLittleEndian[dwKey] = NULL;
 		}
-		pbCmd[7] = Keys[dwKey].bKeyTag;
-		dwCmdSize = 9;
 		if (pContext->fExtentedLeLcFields)
 		{
+			pbCmd[7] = Keys[dwKey].bKeyTag;
+			dwCmdSize = 9;
 			pbCmd[dwCmdSize++] = (BYTE)(pContext->dwMaxCommandDataLength / 0x100);
 			pbCmd[dwCmdSize++] = (BYTE)(pContext->dwMaxCommandDataLength % 0x100);
 		}
 		else
 		{
-			pbCmd[dwCmdSize++] = 0xFF;
+			// short APDU (cards without extended length, e.g. SmartPGP): Lc=02, CRT, Le=00, the rest comes with 61xx
+			pbCmd[4] = 0x02;
+			pbCmd[5] = Keys[dwKey].bKeyTag;
+			pbCmd[6] = 0x00;
+			pbCmd[7] = 0x00;
+			dwCmdSize = 8;
 		}
 
 		dwReturn = OCardGetData(pCardData, pbCmd, dwCmdSize, &pbData, &dwResponseSize);
@@ -606,7 +612,7 @@ DWORD OCardUpdateCachedPublicKey(__in PCARD_DATA pCardData, __in OPENPGP_KEY dwK
 			Trace(WINEVENT_LEVEL_ERROR, L"SCARD_E_UNEXPECTED 0x81");
 			__leave;
 		}
-		if (!find_tlv(pbData + dwOffset,0x82,dwTotalTlvSize, (PBYTE*)&pbExponent,NULL))
+		if (!find_tlv(pbData + dwOffset,0x82,dwTotalTlvSize, (PBYTE*)&pbExponent,&dwExponentSize))
 		{
 			dwReturn = SCARD_E_UNEXPECTED;
 			Trace(WINEVENT_LEVEL_ERROR, L"SCARD_E_UNEXPECTED 0x81");
@@ -614,7 +620,12 @@ DWORD OCardUpdateCachedPublicKey(__in PCARD_DATA pCardData, __in OPENPGP_KEY dwK
 		}
 		Trace(WINEVENT_LEVEL_INFO, L"dwModulusSize %d bits", dwModulusSizeInBytes * 8);
 		
-		pContext->dwExponent[dwKey] = pbExponent[0] * 0x1000000  + pbExponent[1] * 0x10000  + pbExponent[2] * 0x100 + pbExponent[3];
+		// the exponent is big endian, 3 bytes (01 00 01) on OpenPGP v3 cards, 4 bytes on v2 cards
+		pContext->dwExponent[dwKey] = 0;
+		for (dwI = 0; dwI < dwExponentSize && dwI < 4; dwI++)
+		{
+			pContext->dwExponent[dwKey] = pContext->dwExponent[dwKey] * 0x100 + pbExponent[dwI];
+		}
 		pContext->pbModulusInLittleEndian[dwKey] = pCardData->pfnCspAlloc(dwModulusSizeInBytes);
 		if (!pContext->pbModulusInLittleEndian[dwKey])
 		{
@@ -808,6 +819,7 @@ DWORD OCardCreateKey(PCARD_DATA pCardData, OPENPGP_KEY dwKey, DWORD dwBitLen)
 	POPENPGP_CONTEXT pContext = (POPENPGP_CONTEXT) pCardData->pvVendorSpecific;
 	DWORD dwSecondsSince1970;
 	PBYTE pbModulus, pbExponent;
+	DWORD dwExponentSize = 0;
 	DWORD dwModulusSizeInBytes, dwExponent, dwI;
 	BYTE pbCmd[] = {0x00, 
 				    0x47,
@@ -843,16 +855,21 @@ DWORD OCardCreateKey(PCARD_DATA pCardData, OPENPGP_KEY dwKey, DWORD dwBitLen)
 			__leave;
 		}
 
-		pbCmd[7] = Keys[dwKey].bKeyTag;
-		dwCmdSize = 9;
 		if (pContext->fExtentedLeLcFields)
 		{
+			pbCmd[7] = Keys[dwKey].bKeyTag;
+			dwCmdSize = 9;
 			pbCmd[dwCmdSize++] = (BYTE)(pContext->dwMaxCommandDataLength / 0x100);
 			pbCmd[dwCmdSize++] = (BYTE)(pContext->dwMaxCommandDataLength % 0x100);
 		}
 		else
 		{
-			pbCmd[dwCmdSize++] = 0xFF;
+			// short APDU (cards without extended length, e.g. SmartPGP): Lc=02, CRT, Le=00, the rest comes with 61xx
+			pbCmd[4] = 0x02;
+			pbCmd[5] = Keys[dwKey].bKeyTag;
+			pbCmd[6] = 0x00;
+			pbCmd[7] = 0x00;
+			dwCmdSize = 8;
 		}
 		
 		dwReturn = OCardGetData(pCardData, pbCmd, dwCmdSize, &pbData, &dwResponseSize);
@@ -868,13 +885,18 @@ DWORD OCardCreateKey(PCARD_DATA pCardData, OPENPGP_KEY dwKey, DWORD dwBitLen)
 			Trace(WINEVENT_LEVEL_ERROR, L"SCARD_E_UNEXPECTED 0x81");
 			__leave;
 		}
-		if (!find_tlv(pbData + dwOffset,0x82,dwTotalTlvSize, (PBYTE*)&pbExponent,NULL))
+		if (!find_tlv(pbData + dwOffset,0x82,dwTotalTlvSize, (PBYTE*)&pbExponent,&dwExponentSize))
 		{
 			dwReturn = SCARD_E_UNEXPECTED;
 			Trace(WINEVENT_LEVEL_ERROR, L"SCARD_E_UNEXPECTED 0x82");
 			__leave;
 		}
-		dwExponent = pbExponent[0] * 0x1000000  + pbExponent[1] * 0x10000  + pbExponent[2] * 0x100 + pbExponent[3];
+		// the exponent is big endian, 3 bytes (01 00 01) on OpenPGP v3 cards, 4 bytes on v2 cards
+		dwExponent = 0;
+		for (dwI = 0; dwI < dwExponentSize && dwI < 4; dwI++)
+		{
+			dwExponent = dwExponent * 0x100 + pbExponent[dwI];
+		}
 		// save in the cache
 		pContext->fHasKey[dwKey] = TRUE;
 		pContext->dwExponent[dwKey] = dwExponent;
@@ -1232,10 +1254,11 @@ DWORD OCardSign(PCARD_DATA pCardData,
 			__leave;
 		}
 
-		dwCmdSize = 5;
+		// short APDU: Lc right after P2; extended APDU: 00 then a 2 bytes Lc
+		dwCmdSize = 4;
 		if (pContext->fExtentedLeLcFields)
 		{
-			dwCmdSize++;
+			dwCmdSize += 2;
 		}
 		pbCmd[dwCmdSize++] = (BYTE) (SignatureAlgorithm[dwIndex].dwEncodedOidSize + pInfo->cbData);
 		memcpy(pbCmd + dwCmdSize , SignatureAlgorithm[dwIndex].pbEncodedOid,SignatureAlgorithm[dwIndex].dwEncodedOidSize);
@@ -1374,10 +1397,11 @@ DWORD OCardAuthenticate(PCARD_DATA pCardData,
 			__leave;
 		}
 
-		dwCmdSize = 5;
+		// short APDU: Lc right after P2; extended APDU: 00 then a 2 bytes Lc
+		dwCmdSize = 4;
 		if (pContext->fExtentedLeLcFields)
 		{
-			dwCmdSize++;
+			dwCmdSize += 2;
 		}
 		if (dwIndex == OPENPGP_NO_OID)
 		{
@@ -1590,6 +1614,12 @@ DWORD OCardReadContainerMapFile(__in PCARD_DATA  pCardData,
 		memset(pContainer,0,sizeof(CONTAINER_MAP_RECORD) * ContainerMax);
 		
 		dwReturn = OCardGetKeyLengthInBytes(pCardData, KeyAuthentication, &dwSizeInBits);
+		if (dwReturn == SCARD_E_NO_KEY_CONTAINER)
+		{
+			// key not generated: the container stays empty (OpenPGP v3 cards come without keys)
+			dwSizeInBits = 0;
+			dwReturn = 0;
+		}
 		if (dwReturn)
 		{
 			__leave;
@@ -1608,6 +1638,12 @@ DWORD OCardReadContainerMapFile(__in PCARD_DATA  pCardData,
 		}
 
 		dwReturn = OCardGetKeyLengthInBytes(pCardData, KeyConfidentiality, &dwSizeInBits);
+		if (dwReturn == SCARD_E_NO_KEY_CONTAINER)
+		{
+			// key not generated: the container stays empty (OpenPGP v3 cards come without keys)
+			dwSizeInBits = 0;
+			dwReturn = 0;
+		}
 		if (dwReturn)
 		{
 			__leave;
@@ -1630,6 +1666,12 @@ DWORD OCardReadContainerMapFile(__in PCARD_DATA  pCardData,
 		}
 
 		dwReturn = OCardGetKeyLengthInBytes(pCardData, KeySignature, &dwSizeInBits);
+		if (dwReturn == SCARD_E_NO_KEY_CONTAINER)
+		{
+			// key not generated: the container stays empty (OpenPGP v3 cards come without keys)
+			dwSizeInBits = 0;
+			dwReturn = 0;
+		}
 		if (dwReturn)
 		{
 			__leave;

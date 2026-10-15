@@ -49,10 +49,10 @@ BOOL find_tlv(__in PBYTE pbData, __in  DWORD dwTlvSearched, __in DWORD dwTotalSi
 	while (dwOffset < dwTotalSize)
 	{
 		// check the tlv
-		// if it begins with 0x5F => tlv of 2 bytes.
+		// if it begins with 0x5F or 0x7F (low bits 0x1F) => tlv of 2 bytes.
 		// else 1 byte
 		dwTlv = 0;
-		if (pbData[dwOffset] == 0x5F)
+		if ((pbData[dwOffset] & 0x1F) == 0x1F)
 		{
 			dwTlv = pbData[dwOffset] * 0x100;
 			dwOffset++;
@@ -75,7 +75,8 @@ BOOL find_tlv(__in PBYTE pbData, __in  DWORD dwTlvSearched, __in DWORD dwTotalSi
 		else
 		{
 			dwSize = getTlvSize(pbData + dwOffset,&dwOffset);
-			if (dwTlv != 0x73)
+			// enter the constructed DO: OpenPGP v3 cards return GET DATA 6E / 65 with their outer tag
+			if (dwTlv != 0x73 && dwTlv != 0x6E && dwTlv != 0x65)
 			{
 				dwOffset += dwSize;
 			}

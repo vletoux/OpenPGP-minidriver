@@ -152,6 +152,11 @@ DWORD OCardReadFile(__in PCARD_DATA  pCardData,
 		{
 			pbCmd[2] = (BYTE) (Files[dwI].dwTag / 0x100);
 			pbCmd[3] = (BYTE) (Files[dwI].dwTag % 0x100);
+			if (!pContext || !pContext->fExtentedLeLcFields)
+			{
+				// short Le: the card sends the rest with 61xx (SmartPGP has no extended length)
+				dwCmdSize = 5;
+			}
 			dwReturn = OCardGetData(pCardData, pbCmd, dwCmdSize, &pbData, pdwResponseSize);
 			if (dwReturn)
 			{

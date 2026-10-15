@@ -22,6 +22,8 @@
 #include <Wmistr.h>
 #include <Evntrace.h>
 #include "cardmod.h"
+// the hook below is assigned at build time: keep the pre-VS2015 writable declaration
+#define DELAYIMP_INSECURE_WRITABLE_HOOKS
 #include <DelayImp.h>
 #pragma comment(lib, "Delayimp.lib")
 #include "Tracing.h"

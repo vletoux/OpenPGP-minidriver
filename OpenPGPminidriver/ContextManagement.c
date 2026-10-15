@@ -142,17 +142,13 @@ DWORD CheckContextEx(__in PCARD_DATA pCardData, __in BOOL fOpenPGPContextShouldB
 
 			}
 		}
-		if (!fRightATRLenFound)
-		{
-			Trace(WINEVENT_LEVEL_ERROR, L"card doesn't match ATR len %d",pCardData->cbAtr);
-			dwReturn  = SCARD_E_INVALID_PARAMETER;
-			__leave;
-		}
 		if (!fFound)
 		{
-			Trace(WINEVENT_LEVEL_ERROR, L"card doesn't match ATR");
-			dwReturn  = SCARD_E_UNKNOWN_CARD;
-			__leave;
+			// Windows only loads the minidriver for the ATRs registered under Calais\SmartCards,
+			// so an unknown ATR is a card added by the administrator (e.g. an OpenPGP applet on a JavaCard).
+			// The OpenPGP application is selected by its AID later on.
+			Trace(WINEVENT_LEVEL_WARNING, L"card doesn't match a known ATR (len %d %s): trusting the Calais registration",
+				pCardData->cbAtr, fRightATRLenFound ? L"ok" : L"ko");
 		}
 
 		if ( pCardData->pwszCardName == NULL )
