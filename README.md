@@ -8,8 +8,16 @@ It has been designed to provide support for the OpenPGP card.
 
 ## Getting Started
 
-Open the solution in Visual Studio and build the project.
-The version used for the development is Visual Studio 2012
+Open the solution in any recent Visual Studio (the toolset is selected automatically) and build the project,
+or run `build.cmd [Release|Debug] [Win32|x64|ARM64]` to build every platform (x86, x64 and ARM64).
+
+The version number is generated from the git tag (`GenerateVersion.ps1`, written to `version.h`).
+
+### Installers
+
+`msi.cmd` builds the x86, x64 and ARM64 MSI (WiX Toolset v5, restored from NuGet).
+`sign.cmd <certificate> [bin|msi]` signs the DLLs or the MSI.
+The MSI copies the minidriver in the system folder and registers the OpenPGP card v2 / v3 ATR.
 
 ### Prerequisites
 

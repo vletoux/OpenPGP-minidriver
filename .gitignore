@@ -279,3 +279,5 @@ __pycache__/
 # tools/**
 # !tools/packages.config
 *.dll
+
+version.h

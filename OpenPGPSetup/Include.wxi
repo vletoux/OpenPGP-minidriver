@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Include>
+  <?define UpgradeCode="8B9CBE88-4B41-4141-A75E-296BD0E4A827" ?>
+  <?define SourceDir = "$(var.RootDir)\$(var.Plat)\$(var.Config)"?>
+  <?define SourceDirAlwaysX86 = "$(var.RootDir)\x86\$(var.Config)"?>
+  <?if $(var.Plat) = ARM64 ?>
+  <?define NativeDll = "openpgpmdrvARM64.dll" ?>
+  <?else?>
+  <?define NativeDll = "openpgpmdrv64.dll" ?>
+  <?endif?>
+</Include>
